@@ -8,7 +8,7 @@ except ImportError:
 from django.db import models
 from django.db.models.query import QuerySet
 from django.conf import settings
-from django.core.mail import send_mail
+from django.core.mail import send_mail, EmailMultiAlternatives
 from django.core.urlresolvers import reverse
 from django.template import Context
 from django.template.loader import render_to_string
@@ -297,11 +297,18 @@ def send_now(users, label, extra_context=None, on_site=True):
             'message': messages['full.txt'],
         }, context)
 
+        html_body = render_to_string('notification/email_body.html', {
+            'message': messages['full.txt'],
+        }, context)
+
         notice = Notice.objects.create(user=user, message=messages['notice.html'],
             notice_type=notice_type, on_site=on_site)
         if should_send(user, notice_type, "1") and user.email: # Email
             recipients.append(user.email)
-        send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, recipients)
+
+        msg = EmailMultiAlternatives(subject, body, settings.DEFAULT_FROM_EMAIL, recipients)
+        msg.attach_alternative(html_body, 'text/html')
+        msg.send()
 
     # reset environment to original language
     activate(current_language)
