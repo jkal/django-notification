@@ -275,6 +275,8 @@ def send_now(users, label, extra_context=None, on_site=True):
         if language is not None:
             # activate the user's language
             activate(language)
+        else:
+            activate(settings.LANGUAGE_CODE)
 
         # update context with user specific translations
         context = Context({
