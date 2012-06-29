@@ -26,10 +26,9 @@ from django.utils.translation import ugettext_lazy as _
 from django.utils.translation import ugettext, get_language, activate
 
 
-QUEUE_ALL = getattr(settings, "NOTIFICATION_QUEUE_ALL", False)
-
 class LanguageStoreNotAvailable(Exception):
     pass
+
 
 class NoticeType(models.Model):
 
@@ -74,6 +73,7 @@ class NoticeSetting(models.Model):
         verbose_name_plural = _("notice settings")
         unique_together = ("user", "notice_type", "medium")
 
+
 def get_notification_setting(user, notice_type, medium):
     try:
         return NoticeSetting.objects.get(user=user, notice_type=notice_type, medium=medium)
@@ -82,6 +82,7 @@ def get_notification_setting(user, notice_type, medium):
         setting = NoticeSetting(user=user, notice_type=notice_type, medium=medium, send=default)
         setting.save()
         return setting
+
 
 def should_send(user, notice_type, medium):
     return get_notification_setting(user, notice_type, medium).send
@@ -116,6 +117,7 @@ class NoticeManager(models.Manager):
         mark them seen
         """
         return self.notices_for(user, unseen=True, **kwargs).count()
+
 
 class Notice(models.Model):
 
@@ -158,12 +160,6 @@ class Notice(models.Model):
         return ("notification_notice", [str(self.pk)])
     get_absolute_url = models.permalink(get_absolute_url)
 
-class NoticeQueueBatch(models.Model):
-    """
-    A queued notice.
-    Denormalized data for a notice.
-    """
-    pickled_data = models.TextField()
 
 def create_notice_type(label, display, description, default=2, verbosity=1):
     """
@@ -192,22 +188,6 @@ def create_notice_type(label, display, description, default=2, verbosity=1):
         if verbosity > 1:
             print "Created %s NoticeType" % label
 
-def get_notification_language(user):
-    """
-    Returns site-specific notification language for this user. Raises
-    LanguageStoreNotAvailable if this site does not use translated
-    notifications.
-    """
-    if getattr(settings, 'NOTIFICATION_LANGUAGE_MODULE', False):
-        try:
-            app_label, model_name = settings.NOTIFICATION_LANGUAGE_MODULE.split('.')
-            model = models.get_model(app_label, model_name)
-            language_model = model._default_manager.get(user__id__exact=user.id)
-            if hasattr(language_model, 'language'):
-                return language_model.language
-        except (ImportError, ImproperlyConfigured, model.DoesNotExist):
-            raise LanguageStoreNotAvailable
-    raise LanguageStoreNotAvailable
 
 def get_formatted_messages(formats, label, context):
     """
@@ -236,7 +216,7 @@ def send_now(users, label, extra_context=None, on_site=True):
         'spam': 'eggs',
         'foo': 'bar',
     )
-    
+
     You can pass in on_site=False to prevent the notice emitted from being
     displayed on the site.
     """
@@ -264,20 +244,10 @@ def send_now(users, label, extra_context=None, on_site=True):
     ) # TODO make formats configurable
 
     for user in users:
+        if not user.email:
+            return
+
         recipients = []
-        # get user language for user from language store defined in
-        # NOTIFICATION_LANGUAGE_MODULE setting
-        try:
-            language = get_notification_language(user)
-        except LanguageStoreNotAvailable:
-            language = None
-
-        if language is not None:
-            # activate the user's language
-            activate(language)
-        else:
-            activate(settings.LANGUAGE_CODE)
-
         # update context with user specific translations
         context = Context({
             "user": user,
@@ -305,52 +275,17 @@ def send_now(users, label, extra_context=None, on_site=True):
 
         notice = Notice.objects.create(user=user, message=messages['notice.html'],
             notice_type=notice_type, on_site=on_site)
-        if should_send(user, notice_type, "1") and user.email: # Email
+        if should_send(user, notice_type, "1"): # Email
             recipients.append(user.email)
 
         msg = EmailMultiAlternatives(subject, body, settings.DEFAULT_FROM_EMAIL, recipients)
         msg.attach_alternative(html_body, 'text/html')
         msg.send()
 
-    # reset environment to original language
-    activate(current_language)
 
 def send(*args, **kwargs):
-    """
-    A basic interface around both queue and send_now. This honors a global
-    flag NOTIFICATION_QUEUE_ALL that helps determine whether all calls should
-    be queued or not. A per call ``queue`` or ``now`` keyword argument can be
-    used to always override the default global behavior.
-    """
-    queue_flag = kwargs.pop("queue", False)
-    now_flag = kwargs.pop("now", False)
-    assert not (queue_flag and now_flag), "'queue' and 'now' cannot both be True."
-    if queue_flag:
-        return queue(*args, **kwargs)
-    elif now_flag:
-        return send_now(*args, **kwargs)
-    else:
-        if QUEUE_ALL:
-            return queue(*args, **kwargs)
-        else:
-            return send_now(*args, **kwargs)
-        
-def queue(users, label, extra_context=None, on_site=True):
-    """
-    Queue the notification in NoticeQueueBatch. This allows for large amounts
-    of user notifications to be deferred to a seperate process running outside
-    the webserver.
-    """
-    if extra_context is None:
-        extra_context = {}
-    if isinstance(users, QuerySet):
-        users = [row["pk"] for row in users.values("pk")]
-    else:
-        users = [user.pk for user in users]
-    notices = []
-    for user in users:
-        notices.append((user, label, extra_context, on_site))
-    NoticeQueueBatch(pickled_data=pickle.dumps(notices).encode("base64")).save()
+    return send_now(*args, **kwargs)
+
 
 class ObservedItemManager(models.Manager):
 
@@ -408,12 +343,14 @@ def observe(observed, observer, notice_type_label, signal='post_save'):
     observed_item.save()
     return observed_item
 
+
 def stop_observing(observed, observer, signal='post_save'):
     """
     Remove an observed item.
     """
     observed_item = ObservedItem.objects.get_for(observed, observer, signal)
     observed_item.delete()
+
 
 def send_observation_notices_for(observed, signal='post_save'):
     """
@@ -423,6 +360,7 @@ def send_observation_notices_for(observed, signal='post_save'):
     for observed_item in observed_items:
         observed_item.send_notice()
     return observed_items
+
 
 def is_observing(observed, observer, signal='post_save'):
     if isinstance(observer, AnonymousUser):
@@ -434,6 +372,7 @@ def is_observing(observed, observer, signal='post_save'):
         return False
     except ObservedItem.MultipleObjectsReturned:
         return True
+
 
 def handle_observations(sender, instance, *args, **kw):
     send_observation_notices_for(instance)

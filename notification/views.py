@@ -3,18 +3,8 @@ from django.shortcuts import render_to_response, get_object_or_404
 from django.http import HttpResponseRedirect, Http404
 from django.template import RequestContext
 from django.contrib.auth.decorators import login_required
-from django.contrib.syndication.views import feed
-
 from notification.models import *
-from notification.decorators import basic_auth_required, simple_basic_auth_callback
-from notification.feeds import NoticeUserFeed
 
-@basic_auth_required(realm='Notices Feed', callback_func=simple_basic_auth_callback)
-def feed_for_user(request):
-    url = "feed/%s" % request.user.username
-    return feed(request, url, {
-        "feed": NoticeUserFeed,
-    })
 
 @login_required
 def notices(request):
@@ -34,17 +24,18 @@ def notices(request):
                 setting.save()
             settings_row.append((form_label, setting.send))
         settings_table.append({"notice_type": notice_type, "cells": settings_row})
-    
+
     notice_settings = {
         "column_headers": [medium_display for medium_id, medium_display in NOTICE_MEDIA],
         "rows": settings_table,
     }
-    
+
     return render_to_response("notification/notices.html", {
         "notices": notices,
         "notice_types": notice_types,
         "notice_settings": notice_settings,
     }, context_instance=RequestContext(request))
+
 
 @login_required
 def single(request, id):
@@ -54,6 +45,7 @@ def single(request, id):
             "notice": notice,
         }, context_instance=RequestContext(request))
     raise Http404
+
 
 @login_required
 def archive(request, noticeid=None, next_page=None):
@@ -69,6 +61,7 @@ def archive(request, noticeid=None, next_page=None):
             return HttpResponseRedirect(next_page)
     return HttpResponseRedirect(next_page)
 
+
 @login_required
 def delete(request, noticeid=None, next_page=None):
     if noticeid:
@@ -83,8 +76,8 @@ def delete(request, noticeid=None, next_page=None):
             return HttpResponseRedirect(next_page)
     return HttpResponseRedirect(next_page)
 
+
 @login_required
 def mark_all_seen(request):
     Notice.objects.notices_for(request.user, unseen=True).update(unseen=False)
     return HttpResponseRedirect(reverse("notification_notices"))
-    
