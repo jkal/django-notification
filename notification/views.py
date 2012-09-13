@@ -85,8 +85,6 @@ def delete(request, noticeid=None, next_page=None):
 
 @login_required
 def mark_all_seen(request):
-    for notice in Notice.objects.notices_for(request.user, unseen=True):
-        notice.unseen = False
-        notice.save()
+    Notice.objects.notices_for(request.user, unseen=True).update(unseen=False)
     return HttpResponseRedirect(reverse("notification_notices"))
     
